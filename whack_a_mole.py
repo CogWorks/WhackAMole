@@ -20,7 +20,7 @@ from cocos.scenes.transitions import *
 from cocos.sprite import Sprite
 from cocos.tiles import RectMapLayer
 from cocos.actions.instant_actions import CallFunc
-from cocos.actions.interval_actions import Delay, MoveTo, AccelDeccel, FadeTo
+from cocos.actions.interval_actions import RandomDelay, Delay, MoveTo, AccelDeccel, FadeTo, Accelerate
 from cocos.collision_model import CollisionManagerBruteForce, AARectShape
 
 from primitives import Polygon
@@ -218,17 +218,20 @@ class Mole(Sprite, AARectShape):
         
     def setState(self, value):
         self.state = value
-            
-    def display(self):
+    
+    def waitDone(self):
+        self.checkHitState()
+        self.do(AccelDeccel(MoveTo(self.position_in, self.t)) + CallFunc(self.setActive, False) + CallFunc(self.setState, 0))
+    
+    def upDone(self):
+        self.do(RandomDelay(.25,.5) + CallFunc(self.waitDone))
+        
+    def up(self):
+        self.t = random.uniform(.25,1.0)
         self.setImage(0)
         self.position = self.position_in
-        self.do(CallFunc(self.setActive, True) + 
-                AccelDeccel(MoveTo(self.position_out, 1)) +
-                Delay(.5) + 
-                CallFunc(self.checkHitState) + 
-                AccelDeccel(MoveTo(self.position_in, 1)) +
-                CallFunc(self.setActive, False) +
-                CallFunc(self.setState, 0))
+        self.setActive(True)
+        self.do(RandomDelay(0.0,0.2) + AccelDeccel(MoveTo(self.position_out, self.t)) + CallFunc(self.upDone))
         
     def laugh(self):
         self.player_laugh.play()
@@ -239,8 +242,13 @@ class Mole(Sprite, AARectShape):
                 self.setImageFunc(3)+Delay(.1)+
                 self.setImageFunc(1)+Delay(.1))
         
+    def down_fast(self):
+        self.do(Accelerate(MoveTo(self.position_in, self.t/2)) + CallFunc(self.setActive, False) + CallFunc(self.setState, 0))
+        
     def thump(self):
         self.player_thump.play()
+        self.stop()
+        self.down_fast()
         self.do(self.setImageFunc(4)+Delay(.1)+
                 self.setImageFunc(5)+Delay(.1)+
                 self.setImageFunc(6)+Delay(.1)+
@@ -352,10 +360,15 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
                                 color=color)
                     p.render()
         
-    def animate(self, dt):
+    def mole_up(self):
         moles = [mole for mole in self.moles if not mole.active]
         if moles:
-            random.choice(moles).display()
+            random.choice(moles).up()
+        
+    def animate(self, dt):
+        self.mole_up()
+        if random.randint(0, 3) == 0:
+            self.mole_up()
                     
     def game_over(self):
         self.state = self.STATE_GAME_OVER
@@ -484,7 +497,7 @@ class WhackAMole(object):
         director.window.pop_handlers()
         director.window.push_handlers(DefaultHandler())
                     
-        director.settings = {'overlay': True,
+        director.settings = {'overlay': False,
                              'eyetracker': True,
                              'eyetracker_ip': '127.0.0.1',
                              'eyetracker_out_port': '4444',
@@ -494,7 +507,7 @@ class WhackAMole(object):
                              'calibration_random': 1,
                              'calibration_level': 3,
                              'calibration_auto': 1,
-                             'calibration_points': 5,
+                             'calibration_points': 2,
                              'calibration_eye': 0
                             }
         
