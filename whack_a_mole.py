@@ -63,6 +63,7 @@ class OptionsMenu(BetterMenu):
         self.eye_opts = ['NONE','RIGHT','LEFT']
         self.points_opts = ['2','5','9','13']
         
+        self.items['overlay'] = ToggleMenuItem('Debug Overlay:', self.on_overlay, director.settings['overlay'])
         self.items['eyetracker'] = ToggleMenuItem('EyeTracker:', self.on_eyetracker, director.settings['eyetracker'])
         self.items['eyetracker_ip'] = EntryMenuItem('EyeTracker IP:', self.on_eyetracker_ip, director.settings['eyetracker_ip'])
         self.items['eyetracker_in_port'] = EntryMenuItem('EyeTracker In Port:', self.on_eyetracker_in_port, director.settings['eyetracker_in_port'])
@@ -76,6 +77,9 @@ class OptionsMenu(BetterMenu):
         self.items['calibration_random'] = ToggleMenuItem('Calibration Randomize:', self.on_cal_random, director.settings['calibration_random'])
         
         self.create_menu(self.items.values(), zoom_in(), zoom_out())
+
+    def on_overlay(self, value):
+        director.settings['overlay'] = value
 
     def on_eyetracker(self, value):
         director.settings['eyetracker'] = value
@@ -329,14 +333,15 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         
     def visit(self):
         super(Task, self).visit()
-        for mole in self.moles:
-            if mole.opacity > -1:
-                p = Polygon([(mole.center[0]-mole.rx, mole.center[1]-mole.ry), 
-                             (mole.center[0]+mole.rx, mole.center[1]-mole.ry),
-                             (mole.center[0]+mole.rx, mole.center[1]+mole.ry),
-                             (mole.center[0]-mole.rx, mole.center[1]+mole.ry)],
-                            color=(.3,0.2,0.5,.7))
-                p.render()
+        if director.settings["overlay"]:
+            for mole in self.moles:
+                if mole.opacity > -1:
+                    p = Polygon([(mole.center[0]-mole.rx, mole.center[1]-mole.ry), 
+                                 (mole.center[0]+mole.rx, mole.center[1]-mole.ry),
+                                 (mole.center[0]+mole.rx, mole.center[1]+mole.ry),
+                                 (mole.center[0]-mole.rx, mole.center[1]+mole.ry)],
+                                color=(.3,0.2,0.5,.7))
+                    p.render()
         
     def animate(self, dt):
         moles = [mole for mole in self.moles if not mole.active]
@@ -449,7 +454,8 @@ class WhackAMole(object):
         director.window.pop_handlers()
         director.window.push_handlers(DefaultHandler())
                     
-        director.settings = {'eyetracker': False,
+        director.settings = {'overlay': True,
+                             'eyetracker': False,
                              'eyetracker_ip': '127.0.0.1',
                              'eyetracker_out_port': '4444',
                              'eyetracker_in_port': '5555',
