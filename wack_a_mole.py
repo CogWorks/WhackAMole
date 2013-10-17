@@ -2,20 +2,28 @@
 
 from __future__ import division
 
-import sys, os
+import sys, os, random
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),"pyviewx.client"))
 sys.path.insert(1, os.path.join(os.path.dirname(os.path.realpath(__file__)),"pyviewx.pygame"))
 
-from pyglet import resource
+from pyglet import resource, clock
 from pyglet.gl import *
 from pyglet.window import key
+from pyglet.media import Player, StaticSource
 
 from cocos.director import *
 from cocos.menu import *
 from cocos.layer import *
 from cocos.text import *
 from cocos.scenes.transitions import *
+from cocos.sprite import Sprite
+from cocos.tiles import RectMapLayer
+from cocos.actions.instant_actions import CallFunc
+from cocos.actions.interval_actions import Delay, MoveTo, AccelDeccel, FadeTo
+from cocos.collision_model import CollisionManagerBruteForce, AARectShape
+
+from primitives import Polygon
 
 from odict import OrderedDict
 
@@ -27,6 +35,7 @@ from pyviewx.client import iViewXClient, Dispatcher
 from calibrator import CalibrationLayer
 
 from menu import BetterMenu, GhostMenuItem, BetterEntryMenuItem
+from handler import DefaultHandler
 from scene import Scene
 
 from pycogworks.logging import getDateTimeStamp
@@ -54,6 +63,7 @@ class OptionsMenu(BetterMenu):
         self.eye_opts = ['NONE','RIGHT','LEFT']
         self.points_opts = ['2','5','9','13']
         
+        self.items['eyetracker'] = ToggleMenuItem('EyeTracker:', self.on_eyetracker, director.settings['eyetracker'])
         self.items['eyetracker_ip'] = EntryMenuItem('EyeTracker IP:', self.on_eyetracker_ip, director.settings['eyetracker_ip'])
         self.items['eyetracker_in_port'] = EntryMenuItem('EyeTracker In Port:', self.on_eyetracker_in_port, director.settings['eyetracker_in_port'])
         self.items['eyetracker_out_port'] = EntryMenuItem('EyeTracker Out Port:', self.on_eyetracker_out_port, director.settings['eyetracker_out_port'])
@@ -66,6 +76,9 @@ class OptionsMenu(BetterMenu):
         self.items['calibration_random'] = ToggleMenuItem('Calibration Randomize:', self.on_cal_random, director.settings['calibration_random'])
         
         self.create_menu(self.items.values(), zoom_in(), zoom_out())
+
+    def on_eyetracker(self, value):
+        director.settings['eyetracker'] = value
     
     def on_cal_points(self, value):
         director.settings['calibration_points'] = int(self.points_opts[value])
@@ -121,7 +134,7 @@ class OptionsMenu(BetterMenu):
 class MainMenu(BetterMenu):
 
     def __init__(self):
-        super(MainMenu, self).__init__("SMI Calibration Test")
+        super(MainMenu, self).__init__("Wack A Mole")
         self.screen = director.get_window_size()
         
         ratio = self.screen[1] / self.screen[0]
@@ -149,12 +162,88 @@ class MainMenu(BetterMenu):
         self.parent.switch_to(1)
         
     def on_start(self):
-        filebase = "pySnake_%s" % (getDateTimeStamp())
+        filebase = "WackAMole_%s" % (getDateTimeStamp())
         director.settings['filebase'] = filebase
         director.scene.dispatch_event('start_task')
 
     def on_quit(self):
         reactor.callFromThread(reactor.stop)
+                
+class Mole(Sprite, AARectShape):
+    
+    def __init__(self, images, x, y):
+        self.images = images
+        super(Mole, self).__init__(self.images[0], anchor=(0,0), position=(x,y))
+        self.position_out = self.position
+        self.position_in = (self.position[0],self.position[1]-130)
+        self.position = self.position_in
+        self.bottom = self.position_in[1] + 200
+        self.cshape = self
+        self.active = False
+        
+        self.player_thump = StaticSource(pyglet.resource.media('ow.mp3'))
+        self.player_laugh = StaticSource(pyglet.resource.media('laugh.mp3'))
+        
+        self.STATE_IDLE = 0
+        self.STATE_HIT = 1
+        self.STATE_MISS = 2
+        self.state = self.STATE_IDLE
+        
+    def __getattribute__(self,name):
+        if name=='center':
+            return (self.position[0]+89, (self.position[1]+self.bottom+200)/2 - 20)
+        elif name=='rx':
+            return 89
+        elif name=='ry':
+            return (self.position[1]+200-self.bottom)/2 + 20
+        else:
+            return object.__getattribute__(self, name)
+        
+    def setImage(self, index):
+        self.image = self.images[index]
+        
+    def setImageFunc(self, index):
+        return CallFunc(self.setImage, index)
+    
+    def checkHitState(self):
+        if self.state == self.STATE_IDLE:
+            self.laugh()
+            self.state = self.STATE_MISS
+    
+    def setActive(self, value):
+        self.active = value
+        
+    def setState(self, value):
+        self.state = value
+            
+    def display(self):
+        self.setImage(0)
+        self.position = self.position_in
+        self.do(CallFunc(self.setActive, True) + 
+                AccelDeccel(MoveTo(self.position_out, 1)) +
+                Delay(.5) + 
+                CallFunc(self.checkHitState) + 
+                AccelDeccel(MoveTo(self.position_in, 1)) +
+                CallFunc(self.setActive, False) +
+                CallFunc(self.setState, 0))
+        
+    def laugh(self):
+        self.player_laugh.play()
+        self.do(self.setImageFunc(1)+Delay(.1)+
+                self.setImageFunc(2)+Delay(.1)+
+                self.setImageFunc(3)+Delay(.1)+
+                self.setImageFunc(2)+Delay(.1)+
+                self.setImageFunc(3)+Delay(.1)+
+                self.setImageFunc(1)+Delay(.1))
+        
+    def thump(self):
+        self.player_thump.play()
+        self.do(self.setImageFunc(4)+Delay(.1)+
+                self.setImageFunc(5)+Delay(.1)+
+                self.setImageFunc(6)+Delay(.1)+
+                self.setImageFunc(4)+Delay(.1)+
+                self.setImageFunc(5)+Delay(.1)+
+                self.setImageFunc(6)+Delay(.1))
         
 class Task(ColorLayer, pyglet.event.EventDispatcher):
     
@@ -167,6 +256,9 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
     STATE_TASK = 3
     STATE_DONE = 4
     
+    BG_TILE_SIZE = (1024,128)
+    FG_TILE_SIZE = (1024,128)
+    
     is_event_handler = True
     
     def __init__(self, client):
@@ -174,15 +266,88 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         super(Task, self).__init__(0, 0, 0, 255, self.screen[0], self.screen[1])
         self.state = self.STATE_INIT
         
+        self.mole_images = [resource.image('mole_1.png'),
+                            resource.image('mole_laugh1.png'),
+                            resource.image('mole_laugh2.png'),
+                            resource.image('mole_laugh3.png'),
+                            resource.image('mole_thump1.png'),
+                            resource.image('mole_thump2.png'),
+                            resource.image('mole_thump3.png'),
+                            resource.image('mole_thump4.png')]
+        
+        self.music = Player()
+        self.music.queue(pyglet.resource.media('whack.mp3'))
+        self.music.eos_action = 'loop'
+        
+        self.cm = CollisionManagerBruteForce()
+        
+        self.moles = []
+        for i in range(0,3):
+            mole = Mole(self.mole_images, (112 + (i * 310)), (127-80))
+            self.moles.append(mole)
+            self.add(mole, 55)
+            self.cm.add(mole)
+        for i in range(3,6):
+            mole = Mole(self.mole_images, (112 + ((i-3) * 310)), (383-80))
+            self.moles.append(mole)
+            self.add(mole, 35)
+            self.cm.add(mole)
+        for i in range(6,9):
+            mole = Mole(self.mole_images, (112 + ((i-6) * 310)), (639-80))
+            self.moles.append(mole)
+            self.add(mole, 15)
+            self.cm.add(mole)
+
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,0)))
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,128)))
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,256)))
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,384)))
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,512)))
+        self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,640)))
+        
+        self.add(Sprite(resource.image('grass_lower128.png'), anchor=(0,0), position=(0,0)), z=60)
+        self.add(Sprite(resource.image('grass_upper128.png'), anchor=(0,0), position=(0,128)), z=50)
+        self.add(Sprite(resource.image('grass_lower128.png'), anchor=(0,0), position=(0,256)), z=40)
+        self.add(Sprite(resource.image('grass_upper128.png'), anchor=(0,0), position=(0,384)), z=30)
+        self.add(Sprite(resource.image('grass_lower128.png'), anchor=(0,0), position=(0,512)), z=20)
+        self.add(Sprite(resource.image('grass_upper128.png'), anchor=(0,0), position=(0,640)), z=10)
+        
+        
+    def visit(self):
+        super(Task, self).visit()
+        """
+        for mole in self.moles:
+            if mole.opacity > -1:
+                p = Polygon([(mole.center[0]-mole.rx, mole.center[1]-mole.ry), 
+                             (mole.center[0]+mole.rx, mole.center[1]-mole.ry),
+                             (mole.center[0]+mole.rx, mole.center[1]+mole.ry),
+                             (mole.center[0]-mole.rx, mole.center[1]+mole.ry)],
+                            color=(.3,0.2,0.5,.7))
+                p.render()
+        """
+        
+    def animate(self, dt):
+        moles = [mole for mole in self.moles if not mole.active]
+        if moles:
+            random.choice(moles).display()
+                    
     def game_over(self):
         self.state = self.STATE_GAME_OVER
         
     def clear(self):
-        pass
+        self.music.pause()
+        self.music.seek(0)
+        for mole in self.moles:
+            mole.active = False
+            mole.state = 0
+            mole.position = mole.position_in
+        pyglet.clock.unschedule(self.animate)
         
     def reset(self):
         self.clear()
         self.state = self.STATE_TASK
+        pyglet.clock.schedule_interval(self.animate, .5)
+        self.music.play()
         
     def one_time(self):
         pass
@@ -220,7 +385,10 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         pass
         
     def on_mouse_press(self, x, y, buttons, modifiers):
-        pass
+        for obj in self.cm.objs_touching_point(x, y):
+            if obj.state == 0:
+                obj.state = 1
+                obj.thump()
 
     def on_mouse_motion(self, x, y, dx, dy):
         pass
@@ -243,9 +411,9 @@ class EyetrackerScrim(ColorLayer):
         l = Label("Reconnecting to eyetracker...", position=(self.screen[0] / 2, self.screen[1] / 2), font_name='', font_size=32, bold=True, color=(255, 255, 255, 255), anchor_x='center', anchor_y='center')
         self.add(l)
         
-class CalibrationTest(object):
+class WackAMole(object):
     
-    title = "SMI Calibration Test"
+    title = "Wack A Mole"
         
     def __init__(self):
         
@@ -255,18 +423,14 @@ class CalibrationTest(object):
         pyglet.resource.reindex()
         pyglet.resource.add_font('cutouts.ttf')
         
-        p = pyglet.window.get_platform()
-        d = p.get_default_display()
-        s = d.get_default_screen()
-        
-        director.init(width=s.width, height=s.height,
+        director.init(width=1024, height=768,
                   caption=self.title, visible=False, resizable=True)
-        director.window.set_size(int(s.width * .75), int(s.height * .75))
+        director.window.set_size(1024, 768)
         
         director.window.pop_handlers()
-        #director.window.push_handlers(DefaultHandler())
+        director.window.push_handlers(DefaultHandler())
                     
-        director.settings = {'eyetracker': True,
+        director.settings = {'eyetracker': False,
                              'eyetracker_ip': '127.0.0.1',
                              'eyetracker_out_port': '4444',
                              'eyetracker_in_port': '5555',
@@ -285,8 +449,8 @@ class CalibrationTest(object):
         self.listener = reactor.listenUDP(int(director.settings['eyetracker_in_port']), self.client)
 
         director.set_show_FPS(False)
-        director.window.set_fullscreen(True)
-        director.window.set_mouse_visible(False)
+        director.window.set_fullscreen(False)
+        director.window.set_mouse_visible(True)
                 
         # Intro scene and its layers        
         self.introScene = Scene()
@@ -362,6 +526,6 @@ class CalibrationTest(object):
         director.replace(SplitRowsTransition(self.taskScene))
                  
 if __name__ == '__main__':
-    cal = CalibrationTest()
+    cal = WackAMole()
     cal.show_intro_scene()
     reactor.run()
