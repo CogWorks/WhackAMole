@@ -121,7 +121,6 @@ class OptionsMenu(BetterMenu):
         
     def on_eyetracker(self, value):
         director.settings['eyetracker'] = value
-        self.set_eyetracker_extras(value)
         
     def on_eyetracker_ip(self, ip):
         director.settings['eyetracker_ip'] = ip
@@ -265,9 +264,10 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
     
     is_event_handler = True
     
-    def __init__(self, client):
+    def __init__(self, client=None):
         self.screen = director.get_window_size()
         super(Task, self).__init__(0, 0, 0, 255, 1024, int(768*1.1))
+        self.client = client
         self.state = self.STATE_INIT
         
         self.mole_images = [resource.image('mole_1.png'),
@@ -309,7 +309,12 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
             
         scorey = int((768 + int(768*1.1))/2)
         self.score_num = text.Label("%06d" % self.score, font_name="Score Board", font_size=48, x=512, y=scorey, color=(255, 255, 255, 255),
-                                            anchor_x='center', anchor_y='center', batch=self.text_batch.batch)
+                                    anchor_x='center', anchor_y='center', batch=self.text_batch.batch)
+                                            
+        self.fix = Label('G', font_name='Cut Outs for 3D FX', font_size=48,
+                          position=(0,0), color=(255, 0, 0, 192), anchor_x='center', anchor_y='center')
+        self.fix.visible = False
+        self.add(self.fix, z=100000)
 
         self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,0)))
         self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,128)))
@@ -336,11 +341,15 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         if director.settings["overlay"]:
             for mole in self.moles:
                 if mole.opacity > -1:
+                    if mole.state == 1:
+                        color = (.3,0.0,0.0,.7)
+                    else:
+                        color = (.3,0.2,0.5,.7)
                     p = Polygon([(mole.center[0]-mole.rx, mole.center[1]-mole.ry), 
                                  (mole.center[0]+mole.rx, mole.center[1]-mole.ry),
                                  (mole.center[0]+mole.rx, mole.center[1]+mole.ry),
                                  (mole.center[0]-mole.rx, mole.center[1]+mole.ry)],
-                                color=(.3,0.2,0.5,.7))
+                                color=color)
                     p.render()
         
     def animate(self, dt):
@@ -359,17 +368,23 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
             mole.state = 0
             mole.position = mole.position_in
         pyglet.clock.unschedule(self.animate)
+        if self.client:
+            self.client.removeDispatcher(self.d)
+            self.client.stopDataStreaming()
+            self.client.stopFixationProcessing()
         
     def reset(self):
         self.clear()
+        if self.client:
+            self.client.addDispatcher(self.d)
+            #self.client.setDataFormat('%TS %ET %SX %SY %DX %DY %EX %EY %EZ')
+            #self.client.startDataStreaming()
+            self.client.startFixationProcessing()
         self.state = self.STATE_TASK
         self.score = 0
         pyglet.clock.schedule_interval(self.animate, .5)
         self.music.play()
         
-    def one_time(self):
-        pass
-            
     def on_enter(self):
         if isinstance(director.scene, TransitionScene): return
         super(Task, self).on_enter()
@@ -382,7 +397,6 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
             
     def calibration_ok(self):
         self.dispatch_event("stop_calibration")
-        self.one_time()
         self.reset()
         
     def calibration_bad(self):
@@ -396,22 +410,38 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
 
     @d.listen('ET_FIX')
     def iViewXEvent(self, inResponse):
-        pass
-        
+        if inResponse[0] == 'l':
+            x = int(float(inResponse[2]))
+            y = int(float(inResponse[3]))
+            if director.settings["overlay"]:
+                self.fix.position = (x, y)
+                self.fix.visible = True
+            self.handle_mouse_press(x, y)
+    
+    @d.listen('ET_EFX')
+    def iViewXEvent(self, inResponse):
+        if inResponse[0] == 'l':
+            if director.settings["overlay"]:
+                self.fix.visible = False
+    
     @d.listen('ET_SPL')
     def iViewXEvent(self, inResponse):
         pass
         
+    def handle_mouse_press(self, x, y):
+        for obj in self.cm.objs_touching_point(x, y):
+            if obj.active:
+                if obj.state == 0:
+                    obj.state = 1
+                    obj.thump()
+                    self.score += 10
+                elif obj.state == 2:
+                    self.score -= 10
+                self.set_score()
+        
     def on_mouse_press(self, x, y, buttons, modifiers):
         posx, posy = director.get_virtual_coordinates(x, y)
-        for obj in self.cm.objs_touching_point(posx, posy):
-            if obj.state == 0:
-                obj.state = 1
-                obj.thump()
-                self.score += 10
-            elif obj.state == 2:
-                self.score -= 10
-            self.set_score()
+        self.handle_mouse_press(posx, posy)
 
     def on_mouse_motion(self, x, y, dx, dy):
         pass
@@ -455,7 +485,7 @@ class WhackAMole(object):
         director.window.push_handlers(DefaultHandler())
                     
         director.settings = {'overlay': True,
-                             'eyetracker': False,
+                             'eyetracker': True,
                              'eyetracker_ip': '127.0.0.1',
                              'eyetracker_out_port': '4444',
                              'eyetracker_in_port': '5555',
@@ -463,8 +493,8 @@ class WhackAMole(object):
                              'calibration_wait': 1,
                              'calibration_random': 1,
                              'calibration_level': 3,
-                             'calibration_auto': 0,
-                             'calibration_points': 9,
+                             'calibration_auto': 1,
+                             'calibration_points': 5,
                              'calibration_eye': 0
                             }
         
@@ -475,7 +505,10 @@ class WhackAMole(object):
 
         director.set_show_FPS(False)
         director.window.set_fullscreen(False)
-        director.window.set_mouse_visible(True)
+        if director.settings['eyetracker']:
+            director.window.set_mouse_visible(False)
+        else:
+            director.window.set_mouse_visible(True)
                 
         # Intro scene and its layers        
         self.introScene = Scene()
