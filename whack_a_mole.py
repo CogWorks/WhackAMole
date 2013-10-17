@@ -7,7 +7,7 @@ import sys, os, random
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),"pyviewx.client"))
 sys.path.insert(1, os.path.join(os.path.dirname(os.path.realpath(__file__)),"pyviewx.pygame"))
 
-from pyglet import resource, clock
+from pyglet import resource, clock, text
 from pyglet.gl import *
 from pyglet.window import key
 from pyglet.media import Player, StaticSource
@@ -263,7 +263,7 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
     
     def __init__(self, client):
         self.screen = director.get_window_size()
-        super(Task, self).__init__(0, 0, 0, 255, self.screen[0], self.screen[1])
+        super(Task, self).__init__(0, 0, 0, 255, 1024, int(768*1.1))
         self.state = self.STATE_INIT
         
         self.mole_images = [resource.image('mole_1.png'),
@@ -297,6 +297,15 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
             self.moles.append(mole)
             self.add(mole, 15)
             self.cm.add(mole)
+            
+        self.text_batch = BatchNode()
+        self.add(self.text_batch, z=100)
+        
+        self.score = 0
+            
+        scorey = int((768 + int(768*1.1))/2)
+        self.score_num = text.Label("%06d" % self.score, font_name="Score Board", font_size=48, x=512, y=scorey, color=(255, 255, 255, 255),
+                                            anchor_x='center', anchor_y='center', batch=self.text_batch.batch)
 
         self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,0)))
         self.add(Sprite(resource.image('bg_dirt128.png'), anchor=(0,0), position=(0,128)))
@@ -313,9 +322,13 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         self.add(Sprite(resource.image('grass_upper128.png'), anchor=(0,0), position=(0,640)), z=10)
         
         
+    def set_score(self):
+        self.score_num.begin_update()
+        self.score_num.text = "%06d" % self.score
+        self.score_num.end_update()
+        
     def visit(self):
         super(Task, self).visit()
-        """
         for mole in self.moles:
             if mole.opacity > -1:
                 p = Polygon([(mole.center[0]-mole.rx, mole.center[1]-mole.ry), 
@@ -324,7 +337,6 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
                              (mole.center[0]-mole.rx, mole.center[1]+mole.ry)],
                             color=(.3,0.2,0.5,.7))
                 p.render()
-        """
         
     def animate(self, dt):
         moles = [mole for mole in self.moles if not mole.active]
@@ -346,6 +358,7 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
     def reset(self):
         self.clear()
         self.state = self.STATE_TASK
+        self.score = 0
         pyglet.clock.schedule_interval(self.animate, .5)
         self.music.play()
         
@@ -385,10 +398,15 @@ class Task(ColorLayer, pyglet.event.EventDispatcher):
         pass
         
     def on_mouse_press(self, x, y, buttons, modifiers):
-        for obj in self.cm.objs_touching_point(x, y):
+        posx, posy = director.get_virtual_coordinates(x, y)
+        for obj in self.cm.objs_touching_point(posx, posy):
             if obj.state == 0:
                 obj.state = 1
                 obj.thump()
+                self.score += 10
+            elif obj.state == 2:
+                self.score -= 10
+            self.set_score()
 
     def on_mouse_motion(self, x, y, dx, dy):
         pass
@@ -411,9 +429,9 @@ class EyetrackerScrim(ColorLayer):
         l = Label("Reconnecting to eyetracker...", position=(self.screen[0] / 2, self.screen[1] / 2), font_name='', font_size=32, bold=True, color=(255, 255, 255, 255), anchor_x='center', anchor_y='center')
         self.add(l)
         
-class WackAMole(object):
+class WhackAMole(object):
     
-    title = "Wack A Mole"
+    title = "Whack A Mole"
         
     def __init__(self):
         
@@ -422,10 +440,11 @@ class WackAMole(object):
         pyglet.resource.path.append('resources')
         pyglet.resource.reindex()
         pyglet.resource.add_font('cutouts.ttf')
+        pyglet.resource.add_font('scoreboard.ttf')
         
-        director.init(width=1024, height=768,
+        director.init(width=int(1024*1.0), height=int(768*1.1),
                   caption=self.title, visible=False, resizable=True)
-        director.window.set_size(1024, 768)
+        director.window.set_size(int(1024*1.0), int(768*1.1))
         
         director.window.pop_handlers()
         director.window.push_handlers(DefaultHandler())
@@ -526,6 +545,6 @@ class WackAMole(object):
         director.replace(SplitRowsTransition(self.taskScene))
                  
 if __name__ == '__main__':
-    cal = WackAMole()
+    cal = WhackAMole()
     cal.show_intro_scene()
     reactor.run()
