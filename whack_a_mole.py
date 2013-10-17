@@ -134,7 +134,7 @@ class OptionsMenu(BetterMenu):
 class MainMenu(BetterMenu):
 
     def __init__(self):
-        super(MainMenu, self).__init__("Wack A Mole")
+        super(MainMenu, self).__init__("Whack A Mole")
         self.screen = director.get_window_size()
         
         ratio = self.screen[1] / self.screen[0]
@@ -162,7 +162,7 @@ class MainMenu(BetterMenu):
         self.parent.switch_to(1)
         
     def on_start(self):
-        filebase = "WackAMole_%s" % (getDateTimeStamp())
+        filebase = "WhackAMole_%s" % (getDateTimeStamp())
         director.settings['filebase'] = filebase
         director.scene.dispatch_event('start_task')
 
